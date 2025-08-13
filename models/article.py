@@ -7,10 +7,13 @@ class Article(BaseModel):
     
     title = Column(String(500), nullable=False, index=True)
     url = Column(String(1000), nullable=False, unique=True, index=True)
-    description = Column(Text)
-    content = Column(Text)
+    description = Column(Text)  # RSS summary/description
+    content = Column(Text)  # Full content if available
     author = Column(String(200))
     published_at = Column(DateTime, nullable=False, index=True)
+    
+    # Content metadata
+    content_hash = Column(String(32), index=True)  # For duplicate detection
     
     # RSS Feed relationship
     feed_id = Column(Integer, ForeignKey("rss_feeds.id"), nullable=False, index=True)
@@ -23,3 +26,8 @@ class Article(BaseModel):
     def clean_content(self) -> str:
         """Return cleaned content for processing"""
         return f"{self.title} {self.description or ''} {self.content or ''}"
+    
+    @property
+    def user_id(self) -> int:
+        """Get user ID through feed relationship"""
+        return self.feed.user_id if self.feed else None

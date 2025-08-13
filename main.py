@@ -5,26 +5,30 @@ import uvicorn
 from loguru import logger
 
 from database.connection import init_database
+from api.auth import v1 as auth_v1
 from api.articles import v1 as articles_v1
 from api.feeds import v1 as feeds_v1
 from api.user_feedback import v1 as feedback_v1
+from jobs.feed_crawler import start_background_jobs, stop_background_jobs
 from utils.config import settings
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    logger.info("Starting Simple RSS Feed Reader...")
+    logger.info("Starting Multi-User RSS Feed Reader...")
     await init_database()
+    await start_background_jobs()  # Start automatic feed crawling
     logger.info("Application started successfully")
     
     yield
     
     # Shutdown
     logger.info("Shutting down...")
+    await stop_background_jobs()
 
 app = FastAPI(
-    title="Simple RSS Feed Reader",
-    description="A Simple RSS Feed Reader API",
+    title="Multi-User RSS Feed Reader",
+    description="A Multi-User RSS Feed Reader API with Authentication",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -39,6 +43,7 @@ app.add_middleware(
 )
 
 # Register API routers
+app.include_router(auth_v1.router, prefix="/api/auth", tags=["authentication"])
 app.include_router(articles_v1.router, prefix="/api/articles", tags=["articles"])
 app.include_router(feeds_v1.router, prefix="/api/feeds", tags=["feeds"])
 app.include_router(feedback_v1.router, prefix="/api/feedback", tags=["feedback"])
@@ -46,9 +51,10 @@ app.include_router(feedback_v1.router, prefix="/api/feedback", tags=["feedback"]
 @app.get("/")
 async def root():
     return {
-        "message": "Simple RSS Feed Reader API", 
+        "message": "Multi-User RSS Feed Reader API", 
         "version": "1.0.0",
-        "status": "running"
+        "status": "running",
+        "features": ["authentication", "user_feeds", "scheduled_crawling"]
     }
 
 @app.get("/health")

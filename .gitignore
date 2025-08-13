@@ -71,6 +71,12 @@ env/
 *.sqlite3
 *.db
 *.db-journal
+news_aggregator.db
+news_aggregator.db-journal
+
+# CSV exports and tracking files
+feed_exports/
+feed_crawl_times.csv
 
 # Logs
 *.log

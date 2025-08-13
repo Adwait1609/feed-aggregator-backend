@@ -22,15 +22,20 @@ dependencies = [
     "loguru==0.7.2",
     "beautifulsoup4==4.12.2",
     "requests==2.31.0",
-    "python-dotenv==1.0.0"
+    "python-dotenv==1.0.0",
+    "apscheduler==3.10.4",
+    "python-jose[cryptography]==3.3.0",
+    "passlib[bcrypt]==1.7.4",
+    "email-validator==2.1.0"
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest",
-    "pytest-asyncio",
-    "pytest-cov",
-    "pytest-env",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "pytest-env>=0.8.0",
+    "httpx>=0.24.0",  # For FastAPI test client
     "ruff",
     "pre-commit",
     "ipykernel",
