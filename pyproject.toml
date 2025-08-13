@@ -1,0 +1,48 @@
+# pyproject.toml
+[project]
+name = "feed-aggregator-backend"
+version = "0.1.0"
+description = "AI-Powered Personalized News Feed Backend with Semantic Clustering"
+authors = [
+    { name = "Adwait", email = "adwaitkadam1609@gmail.com" }
+]
+
+
+license = { text = "MIT" }
+requires-python = ">=3.11"
+
+dependencies = [
+    "fastapi==0.104.1",
+    "sqlalchemy==2.0.23",
+    "alembic==1.12.1",
+    "psycopg2-binary==2.9.9",
+    "feedparser==6.0.10",
+    "scikit-learn==1.3.2",
+    "sentence-transformers==2.2.2",
+    "chromadb==0.4.15",
+    "apscheduler==3.10.4",
+    "pydantic-settings==2.0.3",
+    "python-multipart==0.0.6",
+    "loguru==0.7.2",
+    "beautifulsoup4==4.12.2",
+    "requests==2.31.0",
+    "numpy==1.26.0",
+    "pandas==2.1.4",
+    "joblib==1.3.2",
+    "python-dotenv==1.0.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "pytest-env",
+    "ruff",
+    "pre-commit",
+    "ipykernel",
+    "mypy",
+    "types-requests",
+    "types-beautifulsoup4"
+]
+
