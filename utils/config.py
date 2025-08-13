@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     chroma_persist_directory: str = "./chroma_db"
     
     # ML Models
-    model_directory: str = "./models"
+    models_directory: str = "./models"  # Renamed to avoid pydantic warning
     sentence_transformer_model: str = "all-MiniLM-L6-v2"
     
     # API
@@ -25,5 +25,7 @@ class Settings(BaseSettings):
     
     class Config:
         env_file = ".env"
+        protected_namespaces = ('settings_',)  # Fix pydantic warning
+        extra = "ignore"  # Ignore extra fields from environment
 
 settings = Settings()

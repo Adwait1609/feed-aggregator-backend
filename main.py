@@ -17,7 +17,8 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting News Aggregator Backend...")
     await init_database()
-    await start_background_jobs()
+    # Skip background jobs for now - we'll add them later
+    # await start_background_jobs()
     logger.info("Application started successfully")
     
     yield
@@ -54,7 +55,7 @@ async def root():
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
+        host="127.0.0.1",  # Changed from 0.0.0.0 to localhost for Windows compatibility
         port=8000,
         reload=True,
         log_level="info"

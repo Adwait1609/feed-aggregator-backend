@@ -36,23 +36,18 @@ class ArticleFilters(BaseModel):
 async def get_articles(
     limit: int = Query(50, le=200),
     offset: int = Query(0, ge=0),
-    personalized: bool = Query(True),
     session: Session = Depends(get_db)
 ):
-    """Get personalized article feed - main endpoint like your topic search"""
+    """Get articles feed"""
     try:
-        # Base query
+        # Base query - just get recent articles for now
         query = session.query(Article).join(RSSFeed)
         
         # Apply filters
         query = query.filter(RSSFeed.is_active == True)
         
-        if personalized:
-            # Sort by relevance score (personalized ranking)
-            query = query.order_by(Article.relevance_score.desc())
-        else:
-            # Sort by published date
-            query = query.order_by(Article.published_at.desc())
+        # Sort by published date (newest first)
+        query = query.order_by(Article.published_at.desc())
         
         # Pagination
         articles = query.offset(offset).limit(limit).all()
@@ -83,60 +78,36 @@ async def get_similar_articles(
     limit: int = Query(5, le=20),
     session: Session = Depends(get_db)
 ):
-    """Get articles similar to given article - semantic clustering"""
+    """Get articles similar to given article - placeholder for now"""
     try:
-        # Get the target article
-        target_article = session.query(Article).filter(Article.id == article_id).first()
-        if not target_article:
+        # For now, just return empty list
+        # We'll implement clustering later
+        return []
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch similar articles: {str(e)}")
+
+@router.get("/{article_id}")
+async def get_article(article_id: int, session: Session = Depends(get_db)):
+    """Get single article by ID"""
+    try:
+        article = session.query(Article).filter(Article.id == article_id).first()
+        if not article:
             raise HTTPException(status_code=404, detail="Article not found")
         
-        if not target_article.cluster_id:
-            return []  # No cluster assigned yet
-        
-        # Find articles in same cluster
-        similar_articles = session.query(Article).filter(
-            Article.cluster_id == target_article.cluster_id,
-            Article.id != article_id
-        ).order_by(Article.relevance_score.desc()).limit(limit).all()
-        
-        return [ArticleResponse.from_orm(article) for article in similar_articles]
+        return ArticleResponse(
+            id=article.id,
+            title=article.title,
+            url=article.url,
+            description=article.description,
+            author=article.author,
+            published_at=article.published_at,
+            relevance_score=article.relevance_score,
+            feed_name=article.feed.name,
+            cluster_id=article.cluster_id
+        )
         
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch similar articles: {str(e)}")
-
-@router.post("/update-relevance")
-async def update_article_relevance(
-    session: Session = Depends(get_db)
-):
-    """Update relevance scores for all articles - background ML processing"""
-    try:
-        # Initialize personalization engine
-        engine = PersonalizationEngine()
-        engine.load_model()
-        
-        # Get articles without relevance scores
-        articles = session.query(Article).filter(
-            Article.relevance_score == 0.0
-        ).limit(1000).all()
-        
-        if not articles:
-            return {"message": "No articles to update"}
-        
-        # Predict relevance scores
-        scores = engine.predict_relevance(articles)
-        
-        # Update articles
-        for article, score in zip(articles, scores):
-            article.relevance_score = score
-        
-        session.commit()
-        
-        return {
-            "message": f"Updated relevance scores for {len(articles)} articles",
-            "updated_count": len(articles)
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update relevance: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch article: {str(e)}")
