@@ -5,6 +5,7 @@ Test script to verify the RSS feed reader is working
 import asyncio
 import sys
 from pathlib import Path
+import pytest
 
 # Add project root to path
 sys.path.append(str(Path(__file__).parent))
@@ -13,6 +14,7 @@ from database.connection import init_database, SessionLocal
 from models.feed import RSSFeed
 from processors.feed_processor import FeedProcessor
 
+@pytest.mark.asyncio
 async def test_basic_functionality():
     """Test basic RSS feed reader functionality"""
     print("🚀 Testing RSS Feed Reader...")

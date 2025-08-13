@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, Float, Boolean, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
 from models.base import BaseModel
 
@@ -16,15 +16,10 @@ class Article(BaseModel):
     feed_id = Column(Integer, ForeignKey("rss_feeds.id"), nullable=False, index=True)
     feed = relationship("RSSFeed", back_populates="articles")
     
-    # ML Features
-    relevance_score = Column(Float, default=0.0)  # Personalization score
-    cluster_id = Column(String(50), index=True)   # Article cluster
-    embedding_generated = Column(Boolean, default=False)
-    
     # User interaction
     user_feedbacks = relationship("UserFeedback", back_populates="article")
     
     @property
     def clean_content(self) -> str:
-        """Return cleaned content for ML processing"""
+        """Return cleaned content for processing"""
         return f"{self.title} {self.description or ''} {self.content or ''}"

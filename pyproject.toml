@@ -2,7 +2,7 @@
 [project]
 name = "feed-aggregator-backend"
 version = "0.1.0"
-description = "AI-Powered Personalized News Feed Backend with Semantic Clustering"
+description = "Simple RSS Feed Reader"
 authors = [
     { name = "Adwait", email = "adwaitkadam1609@gmail.com" }
 ]
@@ -13,22 +13,15 @@ requires-python = ">=3.11"
 
 dependencies = [
     "fastapi==0.104.1",
+    "uvicorn[standard]>=0.24.0",
     "sqlalchemy==2.0.23",
     "alembic==1.12.1",
-    "psycopg2-binary==2.9.9",
     "feedparser==6.0.10",
-    "scikit-learn==1.3.2",
-    "sentence-transformers==2.2.2",
-    "chromadb==0.4.15",
-    "apscheduler==3.10.4",
     "pydantic-settings==2.0.3",
     "python-multipart==0.0.6",
     "loguru==0.7.2",
     "beautifulsoup4==4.12.2",
     "requests==2.31.0",
-    "numpy==1.26.0",
-    "pandas==2.1.4",
-    "joblib==1.3.2",
     "python-dotenv==1.0.0"
 ]
 
@@ -45,4 +38,11 @@ dev = [
     "types-requests",
     "types-beautifulsoup4"
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["api", "database", "jobs", "models", "processors", "utils"]
 

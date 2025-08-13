@@ -16,7 +16,7 @@ class FeedProcessor:
         self.article_processor = ArticleProcessor()
     
     async def process_feed(self, feed: RSSFeed, session: Session) -> Dict:
-        """Process single RSS feed - similar to your SEC filing processing"""
+        """Process single RSS feed"""
         try:
             logger.info(f"Processing feed: {feed.name}")
             
@@ -77,7 +77,7 @@ class FeedProcessor:
                 session.add(article)
                 session.flush()  # Get the ID
                 
-                # Process article content asynchronously
+                # Process article content
                 await self.article_processor.process_new_article(article)
                 
                 return "new"
