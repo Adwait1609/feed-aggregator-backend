@@ -3,8 +3,8 @@ from typing import Optional
 
 class Settings(BaseSettings):
     # Database
-    database_url: str = "sqlite:///./news_aggregator.db"
-    
+    database_url: str = "postgresql+psycopg2://postgres:password@localhost:5432/RSS"
+
     # API
     api_title: str = "Simple RSS Feed Reader"
     api_version: str = "1.0.0"
