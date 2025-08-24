@@ -20,7 +20,7 @@ class Article(BaseModel):
     feed = relationship("RSSFeed", back_populates="articles")
     
     # User interaction
-    user_feedbacks = relationship("UserFeedback", back_populates="article")
+    user_feedbacks = relationship("UserFeedback", back_populates="article", cascade="all, delete-orphan")
     
     @property
     def clean_content(self) -> str:

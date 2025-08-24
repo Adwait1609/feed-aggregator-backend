@@ -11,10 +11,11 @@ class UserFeedback(BaseModel):
     __tablename__ = "user_feedback"
     
     # For now, we'll use a simple user system
-    user_id = Column(String(50), nullable=False, index=True, default="default_user")
-    
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user = relationship("User", back_populates="feedbacks")
+
     # Article relationship
-    article_id = Column(Integer, ForeignKey("articles.id"), nullable=False, index=True)
+    article_id = Column(Integer, ForeignKey("articles.id", ondelete="CASCADE"), nullable=False, index=True)
     article = relationship("Article", back_populates="user_feedbacks")
     
     # Feedback

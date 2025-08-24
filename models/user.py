@@ -14,6 +14,7 @@ class User(BaseModel):
     
     # Relationships
     feeds = relationship("RSSFeed", back_populates="user", cascade="all, delete-orphan")
-    
+    feedbacks = relationship("UserFeedback", back_populates="user", cascade="all, delete-orphan")
+
     def __str__(self):
         return f"User({self.username})"

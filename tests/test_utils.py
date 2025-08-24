@@ -98,7 +98,7 @@ class TestConfigSettings:
         assert settings.api_version == "1.0.0"
         assert settings.log_level == "INFO"
         assert settings.feed_crawl_interval_minutes == 30
-        assert "sqlite" in settings.database_url
+        assert "postgresql" in settings.database_url
 
 class TestDependencies:
     """Test FastAPI dependencies"""

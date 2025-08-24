@@ -36,17 +36,22 @@ app = FastAPI(
 # CORS middleware for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # React frontend
+    allow_origins=[
+        "http://localhost:3000",    # React frontend
+        "http://127.0.0.1:3000", 
+        "http://localhost:8501",    # Streamlit frontend
+        "http://127.0.0.1:8501"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Register API routers
-app.include_router(auth_v1.router, prefix="/api/auth", tags=["authentication"])
-app.include_router(articles_v1.router, prefix="/api/articles", tags=["articles"])
-app.include_router(feeds_v1.router, prefix="/api/feeds", tags=["feeds"])
-app.include_router(feedback_v1.router, prefix="/api/feedback", tags=["feedback"])
+app.include_router(auth_v1.router, prefix="/api/v1/auth", tags=["authentication"])
+app.include_router(articles_v1.router, prefix="/api/v1/articles", tags=["articles"])
+app.include_router(feeds_v1.router, prefix="/api/v1/feeds", tags=["feeds"])
+app.include_router(feedback_v1.router, prefix="/api/v1/feedback", tags=["feedback"])
 
 @app.get("/")
 async def root():
@@ -64,8 +69,8 @@ async def health_check():
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
-        host="127.0.0.1",
-        port=8000,
+        host=settings.api_host,
+        port=settings.api_port,
         reload=True,
-        log_level="info"
+        log_level=settings.log_level.lower()
     )

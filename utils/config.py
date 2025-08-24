@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     # API
     api_title: str = "Simple RSS Feed Reader"
     api_version: str = "1.0.0"
+    api_host: str = "localhost"
+    api_port: int = 8000
     
     # Logging
     log_level: str = "INFO"

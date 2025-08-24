@@ -21,7 +21,7 @@ class RSSFeed(BaseModel):
     
     # Relationships
     user = relationship("User", back_populates="feeds")
-    articles = relationship("Article", back_populates="feed")
+    articles = relationship("Article", back_populates="feed", cascade="all, delete-orphan")
     
     def __str__(self):
         return f"RSSFeed({self.name} - User: {self.user_id})"

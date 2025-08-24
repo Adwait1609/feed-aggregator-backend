@@ -3,9 +3,11 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
+from loguru import logger
 
 from database.connection import get_db
 from models.feed import RSSFeed
+from models.article import Article
 from models.user import User
 from processors.feed_processor import FeedProcessor
 from utils.dependencies import get_current_active_user
@@ -47,7 +49,7 @@ async def get_user_feeds(
     feeds = session.query(RSSFeed).filter(RSSFeed.user_id == current_user.id).all()
     return feeds
 
-@router.post("/", response_model=FeedResponse)
+@router.post("/", response_model=FeedResponse, status_code=201)
 async def create_feed(
     feed_data: FeedCreate,
     current_user: User = Depends(get_current_active_user),
@@ -133,13 +135,13 @@ async def update_feed(
         session.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to update feed: {str(e)}")
 
-@router.delete("/{feed_id}")
+@router.delete("/{feed_id}", status_code=204)
 async def delete_feed(
     feed_id: int,
     current_user: User = Depends(get_current_active_user),
     session: Session = Depends(get_db)
 ):
-    """Delete user's feed"""
+    """Delete user's feed and all associated articles and feedback"""
     try:
         feed = session.query(RSSFeed).filter(
             RSSFeed.id == feed_id,
@@ -148,15 +150,38 @@ async def delete_feed(
         if not feed:
             raise HTTPException(status_code=404, detail="Feed not found")
         
+        # Count items before deletion for logging
+        article_count = session.query(Article).filter(Article.feed_id == feed_id).count()
+        
+        # Count user feedback that will be deleted
+        from models.user_feedback import UserFeedback
+        feedback_count = session.query(UserFeedback).join(Article).filter(Article.feed_id == feed_id).count()
+        
+        logger.info(f"Deleting feed '{feed.name}' (ID: {feed_id}) with {article_count} articles and {feedback_count} feedback records for user {current_user.username}")
+        
+        # EXPLICIT DELETION ORDER to handle existing data:
+        # 1. First delete user feedback for articles in this feed
+        feedback_to_delete = session.query(UserFeedback).join(Article).filter(Article.feed_id == feed_id).all()
+        for feedback in feedback_to_delete:
+            session.delete(feedback)
+        
+        # 2. Then delete articles in this feed
+        articles_to_delete = session.query(Article).filter(Article.feed_id == feed_id).all()
+        for article in articles_to_delete:
+            session.delete(article)
+        
+        # 3. Finally delete the feed
         session.delete(feed)
         session.commit()
         
-        return {"message": "Feed deleted successfully"}
+        logger.info(f"Successfully deleted feed '{feed.name}', {article_count} articles, and {feedback_count} feedback records")
+        return  # No content for 204
         
     except HTTPException:
         raise
     except Exception as e:
         session.rollback()
+        logger.error(f"Failed to delete feed {feed_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to delete feed: {str(e)}")
 
 @router.post("/{feed_id}/crawl")

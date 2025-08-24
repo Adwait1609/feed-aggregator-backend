@@ -14,7 +14,7 @@ from main import app
 @pytest.fixture(scope="function")
 def test_db():
     """Create a temporary test database for each test"""
-    # Use in-memory SQLite database for tests
+    # Use in-memory SQLite database for tests (faster for testing)
     test_engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     
     # Create all tables
