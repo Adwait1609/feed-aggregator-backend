@@ -4,12 +4,13 @@ from contextlib import asynccontextmanager
 import uvicorn
 from loguru import logger
 
-from database.connection import init_database
+from database.connection import init_database, create_scheduler_table
 from api.auth import v1 as auth_v1
 from api.articles import v1 as articles_v1
 from api.feeds import v1 as feeds_v1
 from api.user_feedback import v1 as feedback_v1
-from jobs.feed_crawler import start_background_jobs, stop_background_jobs
+from api.crawler import v1 as crawler_v1
+from jobs.enhanced_feed_crawler import start_enhanced_crawler, stop_enhanced_crawler
 from utils.config import settings
 
 @asynccontextmanager
@@ -17,14 +18,15 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting Multi-User RSS Feed Reader...")
     await init_database()
-    await start_background_jobs()  # Start automatic feed crawling
+    create_scheduler_table()  # Create APScheduler table
+    await start_enhanced_crawler()  # Start enhanced feed crawling
     logger.info("Application started successfully")
     
     yield
     
     # Shutdown
     logger.info("Shutting down...")
-    await stop_background_jobs()
+    await stop_enhanced_crawler()
 
 app = FastAPI(
     title="Multi-User RSS Feed Reader",
@@ -52,6 +54,7 @@ app.include_router(auth_v1.router, prefix="/api/v1/auth", tags=["authentication"
 app.include_router(articles_v1.router, prefix="/api/v1/articles", tags=["articles"])
 app.include_router(feeds_v1.router, prefix="/api/v1/feeds", tags=["feeds"])
 app.include_router(feedback_v1.router, prefix="/api/v1/feedback", tags=["feedback"])
+app.include_router(crawler_v1.router, prefix="/api/v1/crawler", tags=["crawler"])
 
 @app.get("/")
 async def root():

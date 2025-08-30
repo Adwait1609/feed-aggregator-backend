@@ -29,6 +29,10 @@ async def init_database():
         logger.error(f"Failed to create database tables: {e}")
         raise
 
+def get_database_url() -> str:
+    """Get the database URL for external tools like APScheduler"""
+    return settings.database_url
+
 def get_db() -> Generator[Session, None, None]:
     """Dependency to get database session"""
     db = SessionLocal()
@@ -36,3 +40,28 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
+
+def create_scheduler_table():
+    """Create the APScheduler jobs table if it doesn't exist"""
+    try:
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            # Create the scheduler_jobs table for APScheduler
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS scheduler_jobs (
+                    id VARCHAR(191) NOT NULL PRIMARY KEY,
+                    next_run_time DOUBLE PRECISION,
+                    job_state BYTEA NOT NULL
+                )
+            """))
+            
+            # Create index for better performance
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS ix_scheduler_jobs_next_run_time 
+                ON scheduler_jobs(next_run_time)
+            """))
+            
+            conn.commit()
+            logger.info("APScheduler jobs table created successfully")
+    except Exception as e:
+        logger.warning(f"Failed to create scheduler table (may already exist): {e}")

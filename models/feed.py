@@ -16,6 +16,7 @@ class RSSFeed(BaseModel):
     # Crawling metadata
     last_crawled_at = Column(DateTime)
     crawl_frequency_minutes = Column(Integer, default=60)  # Every hour
+    priority = Column(Integer, default=2)  # 1=high, 2=medium, 3=low
     last_successful_crawl = Column(DateTime)
     crawl_error_count = Column(Integer, default=0)
     
