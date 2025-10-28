@@ -1,12 +1,14 @@
-from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Text, Boolean, ForeignKey, DateTime, UniqueConstraint
 from sqlalchemy.orm import relationship
 from models.base import BaseModel
 
-class Article(BaseModel):
-    __tablename__ = "articles"
+class SharedArticle(BaseModel):
+    """Stores articles, linked to shared feeds (not duplicated per user)"""
+    __tablename__ = "shared_articles"
     
+    feed_id = Column(Integer, ForeignKey("shared_feeds.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(String(500), nullable=False, index=True)
-    url = Column(String(1000), nullable=False, unique=True, index=True)
+    url = Column(String(1000), nullable=False, index=True)
     description = Column(Text)  # RSS summary/description
     content = Column(Text)  # Full content if available
     author = Column(String(200))
@@ -15,19 +17,21 @@ class Article(BaseModel):
     # Content metadata
     content_hash = Column(String(32), index=True)  # For duplicate detection
     
-    # RSS Feed relationship
-    feed_id = Column(Integer, ForeignKey("rss_feeds.id"), nullable=False, index=True)
-    feed = relationship("RSSFeed", back_populates="articles")
+    # Additional fields
+    sentiment_score = Column(Integer, nullable=True)
+    category = Column(String(100), nullable=True)
+    keywords = Column(String, nullable=True)
     
-    # User interaction
-    user_feedbacks = relationship("UserFeedback", back_populates="article", cascade="all, delete-orphan")
+    # Relationships
+    feed = relationship("SharedFeed", back_populates="articles")
+    user_feedback = relationship("SharedUserFeedback", back_populates="article", cascade="all, delete-orphan")
+    
+    # Ensure articles are unique per feed
+    __table_args__ = (
+        UniqueConstraint('feed_id', 'url', name='unique_article_per_feed'),
+    )
     
     @property
     def clean_content(self) -> str:
         """Return cleaned content for processing"""
         return f"{self.title} {self.description or ''} {self.content or ''}"
-    
-    @property
-    def user_id(self) -> int:
-        """Get user ID through feed relationship"""
-        return self.feed.user_id if self.feed else None

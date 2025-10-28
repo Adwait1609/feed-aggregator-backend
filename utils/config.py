@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     api_host: str = "localhost"
     api_port: int = 8000
     
+    # Debug mode
+    debug: bool = False
+    
     # Logging
     log_level: str = "INFO"
     

@@ -16,9 +16,9 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Import all models to ensure they're registered
 from models.base import Base
-from models.article import Article
-from models.feed import RSSFeed
-from models.user_feedback import UserFeedback
+from models.article import SharedArticle
+from models.feed import SharedFeed, FeedSubscription
+from models.user_feedback import SharedUserFeedback
 
 async def init_database():
     """Initialize database tables"""

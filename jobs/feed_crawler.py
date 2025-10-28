@@ -1,226 +1,213 @@
 import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from loguru import logger
 from datetime import datetime, timezone, timedelta
+from typing import List
 
-from database.connection import get_db
-from models.feed import RSSFeed
-from processors.feed_processor import FeedProcessor
-from utils.feed_crawl_tracker import update_feed_crawl_time
+from database.connection import get_db, get_database_url
+from models.feed import SharedFeed, FeedSubscription
+from processors.feed_processor import NormalizedFeedProcessor
+from models.article import SharedArticle
 
-class FeedCrawlerJob:
-    def __init__(self):
-        self.scheduler = AsyncIOScheduler()
-        self.feed_processor = FeedProcessor()
-        self.is_running = False
+# Global scheduler instance
+scheduler = None
+
+async def crawl_feeds_job():
+    """Independent function to crawl feeds - can be serialized by APScheduler"""
+    try:
+        # Create processor instance for this job
+        processor = NormalizedFeedProcessor()
         
-    async def start_background_jobs(self):
-        """Start background crawling jobs for all users' feeds"""
-        if self.is_running:
-            logger.info("Background jobs already running")
-            return
-            
+        # Get database session
+        db = next(get_db())
+        
         try:
-            # Feed crawling job - runs every 15 minutes to check which feeds need updating
-            self.scheduler.add_job(
-                self.crawl_due_feeds,
-                trigger=IntervalTrigger(minutes=15),  # Check every 15 minutes
-                id="feed_crawler_check",
-                name="RSS Feed Crawler Check",
-                replace_existing=True
-            )
+            # Get feeds that need crawling
+            feeds_to_crawl = get_feeds_due_for_crawl(db)
             
-            # Health check job - runs every hour
-            self.scheduler.add_job(
-                self.health_check,
-                trigger=IntervalTrigger(hours=1),
-                id="crawler_health_check",
-                name="Crawler Health Check",
-                replace_existing=True
-            )
-            
-            self.scheduler.start()
-            self.is_running = True
-            logger.info("Background crawling jobs started successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to start background jobs: {str(e)}")
-    
-    async def stop_background_jobs(self):
-        """Stop all background jobs"""
-        if self.scheduler.running:
-            self.scheduler.shutdown()
-            self.is_running = False
-            logger.info("Background jobs stopped")
-    
-    async def crawl_due_feeds(self):
-        """Crawl all feeds that are due for updates (from all users)"""
-        try:
-            logger.info("Checking for feeds due for crawling...")
-            
-            session = next(get_db())
-            
-            # Get all active feeds from all users
-            active_feeds = session.query(RSSFeed).filter(
-                RSSFeed.is_active == True
-            ).all()
-            
-            due_feeds = []
-            for feed in active_feeds:
-                if self._should_crawl_feed(feed):
-                    due_feeds.append(feed)
-            
-            if not due_feeds:
+            if not feeds_to_crawl:
                 logger.info("No feeds due for crawling")
-                session.close()
-                return
+                return {"feeds_crawled": 0}
             
-            logger.info(f"Found {len(due_feeds)} feeds due for crawling")
+            logger.info(f"Starting crawl for {len(feeds_to_crawl)} feeds")
             
-            # Crawl feeds in batches to avoid overwhelming
-            batch_size = 5
-            total_new = 0
-            total_updated = 0
+            total_new_articles = 0
+            total_updated_articles = 0
+            successful_crawls = 0
             
-            for i in range(0, len(due_feeds), batch_size):
-                batch = due_feeds[i:i + batch_size]
-                logger.info(f"Processing batch {i//batch_size + 1}: {len(batch)} feeds")
-                
-                # Process batch concurrently
-                tasks = [
-                    self.crawl_single_feed(feed, session) 
-                    for feed in batch
-                ]
-                
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                
-                # Aggregate results
-                for result in results:
-                    if isinstance(result, dict) and result.get("status") == "success":
-                        total_new += result.get("new_articles", 0)
-                        total_updated += result.get("updated_articles", 0)
-                
-                # Small delay between batches
-                if i + batch_size < len(due_feeds):
-                    await asyncio.sleep(2)
+            for feed in feeds_to_crawl:
+                try:
+                    result = await crawl_single_feed(feed, db, processor)
+                    if result:
+                        total_new_articles += result.get('new_articles', 0)
+                        total_updated_articles += result.get('updated_articles', 0)
+                        successful_crawls += 1
+                except Exception as e:
+                    logger.error(f"Failed to crawl feed {feed.default_name}: {e}")
+                    # Update error count
+                    feed.crawl_error_count += 1
+                    feed.last_crawled_at = datetime.now(timezone.utc)
+                    db.commit()
             
-            session.close()
+            logger.info(f"Crawl cycle completed: {successful_crawls}/{len(feeds_to_crawl)} feeds successful, "
+                       f"{total_new_articles} new articles, {total_updated_articles} updated")
             
-            logger.info(f"Crawling completed: {total_new} new, {total_updated} updated articles from {len(due_feeds)} feeds")
+            return {
+                "feeds_crawled": successful_crawls,
+                "total_new_articles": total_new_articles,
+                "total_updated_articles": total_updated_articles
+            }
             
-        except Exception as e:
-            logger.error(f"Error in crawl_due_feeds: {str(e)}")
+        finally:
+            db.close()
+            
+    except Exception as e:
+        logger.error(f"Crawl cycle failed: {e}")
+        return {"error": str(e)}
+
+def get_feeds_due_for_crawl(session: Session) -> List[SharedFeed]:
+    """Get all shared feeds that are due for crawling"""
+    try:
+        # Get the minimum crawl frequency from all active subscriptions per feed
+        # This ensures we crawl each feed at the frequency requested by the most frequent subscriber
+        subquery = (
+            session.query(
+                FeedSubscription.feed_id,
+                func.min(FeedSubscription.crawl_frequency_minutes).label('min_frequency')
+            )
+            .filter(FeedSubscription.is_active == True)
+            .group_by(FeedSubscription.feed_id)
+            .subquery()
+        )
+        
+        # Get shared feeds that have active subscriptions and are due for crawling
+        feeds_with_frequency = (
+            session.query(SharedFeed, subquery.c.min_frequency)
+            .join(subquery, SharedFeed.id == subquery.c.feed_id)
+            .all()
+        )
+        
+        feeds_due = []
+        for feed, min_frequency in feeds_with_frequency:
+            if is_feed_due(feed, min_frequency):
+                feeds_due.append(feed)
+        
+        return feeds_due
+        
+    except Exception as e:
+        logger.error(f"Error getting feeds due for crawl: {e}")
+        return []
+
+def is_feed_due(feed: SharedFeed, frequency_minutes: int) -> bool:
+    """Check if a feed is due for crawling based on frequency"""
+    if not feed.last_crawled_at:
+        return True  # Never crawled before
     
-    def _should_crawl_feed(self, feed: RSSFeed) -> bool:
-        """Check if feed should be crawled now based on frequency"""
-        if not feed.is_active:
-            return False
-            
-        if not feed.last_crawled_at:
-            return True  # Never crawled before
-            
-        # Make sure last_crawled_at is timezone-aware
-        last_crawled = feed.last_crawled_at
-        if last_crawled.tzinfo is None:
-            last_crawled = last_crawled.replace(tzinfo=timezone.utc)
-            
-        next_crawl_time = last_crawled + timedelta(minutes=feed.crawl_frequency_minutes)
-        return datetime.now(timezone.utc) >= next_crawl_time
+    # Ensure we're comparing timezone-aware datetimes
+    last_crawled = feed.last_crawled_at
+    if last_crawled.tzinfo is None:
+        last_crawled = last_crawled.replace(tzinfo=timezone.utc)
     
-    async def crawl_single_feed(self, feed: RSSFeed, session: Session) -> dict:
-        """Crawl a single feed with error handling"""
-        try:
-            logger.info(f"Crawling feed: {feed.name} (User: {feed.user_id})")
+    time_since_last_crawl = datetime.now(timezone.utc) - last_crawled
+    crawl_interval = timedelta(minutes=frequency_minutes)
+    
+    return time_since_last_crawl >= crawl_interval
+
+async def crawl_single_feed(feed: SharedFeed, session: Session, processor: NormalizedFeedProcessor) -> dict:
+    """Crawl a single shared feed"""
+    try:
+        logger.info(f"Crawling feed: {feed.default_name} ({feed.url})")
+        
+        # Process the feed
+        result = await processor.process_shared_feed(feed, session)
+        
+        if result and result.get('status') == 'success':
+            # Update last crawled time and reset error count
+            feed.last_crawled_at = datetime.now(timezone.utc)
+            feed.last_successful_crawl = datetime.now(timezone.utc)
+            feed.crawl_error_count = 0
+            session.commit()
             
-            # Update last crawled time immediately to prevent duplicate crawling
+            logger.info(f"Successfully crawled {feed.default_name}: "
+                       f"{result.get('new_articles', 0)} new, "
+                       f"{result.get('updated_articles', 0)} updated")
+            
+            return result
+        else:
+            # Update error count and last crawled time
+            feed.crawl_error_count += 1
             feed.last_crawled_at = datetime.now(timezone.utc)
             session.commit()
             
-            # Process the feed
-            result = await self.feed_processor.process_feed(feed, session)
+            logger.warning(f"Failed to crawl {feed.default_name}")
+            return {"error": "Crawl failed"}
             
-            if result.get("status") == "success":
-                # Reset error count on success
-                feed.crawl_error_count = 0
-                feed.last_successful_crawl = datetime.now(timezone.utc)
-                
-                # Update CSV tracker with latest crawl time
-                try:
-                    update_feed_crawl_time(feed.id, feed.last_crawled_at)
-                except Exception as csv_error:
-                    logger.warning(f"Failed to update crawl tracker for feed {feed.name}: {str(csv_error)}")
-            else:
-                # Increment error count on failure
-                feed.crawl_error_count += 1
-                
-                # Disable feed if too many consecutive errors
-                if feed.crawl_error_count >= 5:
-                    feed.is_active = False
-                    logger.warning(f"Disabled feed {feed.name} (User: {feed.user_id}) after {feed.crawl_error_count} consecutive errors")
-            
-            session.commit()
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error crawling feed {feed.name} (User: {feed.user_id}): {str(e)}")
-            
-            # Update error count
-            feed.crawl_error_count += 1
-            if feed.crawl_error_count >= 5:
-                feed.is_active = False
-                logger.warning(f"Disabled feed {feed.name} (User: {feed.user_id}) after {feed.crawl_error_count} consecutive errors")
-            
-            session.commit()
-            
-            return {
-                "feed_name": feed.name,
-                "user_id": feed.user_id,
-                "status": "error",
-                "error": str(e)
-            }
-    
-    async def health_check(self):
-        """Perform health check on the crawling system"""
-        try:
-            session = next(get_db())
-            
-            # Count feeds by status
-            total_feeds = session.query(RSSFeed).count()
-            active_feeds = session.query(RSSFeed).filter(RSSFeed.is_active == True).count()
-            inactive_feeds = total_feeds - active_feeds
-            
-            # Count articles
-            from models.article import Article
-            total_articles = session.query(Article).count()
-            
-            # Recent crawling activity
-            recent_crawls = session.query(RSSFeed).filter(
-                RSSFeed.last_crawled_at >= datetime.now(timezone.utc) - timedelta(hours=24)
-            ).count()
-            
-            # User statistics
-            from models.user import User
-            total_users = session.query(User).count()
-            active_users = session.query(User).filter(User.is_active == True).count()
-            
-            session.close()
-            
-            logger.info(f"Crawler Health Check - Users: {active_users}/{total_users} active | "
-                       f"Feeds: {active_feeds} active, {inactive_feeds} inactive | "
-                       f"Articles: {total_articles} total | Recent crawls (24h): {recent_crawls}")
-            
-        except Exception as e:
-            logger.error(f"Health check failed: {str(e)}")
-
-# Global instance
-crawler_job = FeedCrawlerJob()
+    except Exception as e:
+        logger.error(f"Error crawling feed {feed.default_name}: {e}")
+        
+        # Update error count
+        feed.crawl_error_count += 1
+        feed.last_crawled_at = datetime.now(timezone.utc)
+        session.commit()
+        
+        return {"error": str(e)}
 
 async def start_background_jobs():
-    """Start background crawling jobs"""
-    await crawler_job.start_background_jobs()
+    """Start the background feed crawler"""
+    global scheduler
+    
+    if scheduler and scheduler.running:
+        logger.info("Scheduler already running")
+        return
+    
+    try:
+        # Configure scheduler with persistent job store
+        jobstore = SQLAlchemyJobStore(url=get_database_url())
+        
+        scheduler = AsyncIOScheduler(
+            jobstores={'default': jobstore},
+            job_defaults={
+                'coalesce': True,      # Skip missed runs if scheduler was down
+                'max_instances': 1,    # Only one instance of each job
+                'misfire_grace_time': 300  # Allow 5 minutes delay
+            }
+        )
+        
+        # Add the crawl job - runs every 10 minutes
+        scheduler.add_job(
+            func=crawl_feeds_job,
+            trigger='interval',
+            minutes=10,
+            id='feed_crawl_cycle',
+            name='RSS Feed Crawl Cycle',
+            replace_existing=True
+        )
+        
+        scheduler.start()
+        logger.info("Feed crawler scheduler started successfully")
+        
+        # Run initial crawl
+        await crawl_feeds_job()
+        
+    except Exception as e:
+        logger.error(f"Failed to start crawler: {e}")
+        raise
 
 async def stop_background_jobs():
-    """Stop background crawling jobs"""
-    await crawler_job.stop_background_jobs()
+    """Stop the background feed crawler"""
+    global scheduler
+    
+    if scheduler and scheduler.running:
+        scheduler.shutdown(wait=False)
+        logger.info("Feed crawler scheduler stopped")
+
+async def run_crawl_cycle():
+    """Run a single crawl cycle manually - useful for API endpoints"""
+    try:
+        return await crawl_feeds_job()
+    except Exception as e:
+        logger.error(f"Manual crawl job failed: {e}")
+        return {"error": str(e)}

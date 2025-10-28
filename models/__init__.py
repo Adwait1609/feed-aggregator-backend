@@ -1,7 +1,7 @@
 from .base import BaseModel
 from .user import User
-from .feed import RSSFeed
-from .article import Article
-from .user_feedback import UserFeedback
+from .feed import SharedFeed, FeedSubscription
+from .article import SharedArticle
+from .user_feedback import SharedUserFeedback, FeedbackType
 
-__all__ = ["BaseModel", "User", "RSSFeed", "Article", "UserFeedback"]
+__all__ = ["BaseModel", "User", "SharedFeed", "FeedSubscription", "SharedArticle", "SharedUserFeedback", "FeedbackType"]

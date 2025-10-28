@@ -12,9 +12,9 @@ class User(BaseModel):
     is_active = Column(Boolean, default=True)
     last_login = Column(DateTime)
     
-    # Relationships
-    feeds = relationship("RSSFeed", back_populates="user", cascade="all, delete-orphan")
-    feedbacks = relationship("UserFeedback", back_populates="user", cascade="all, delete-orphan")
+    # Relationships - Normalized models
+    feed_subscriptions = relationship("FeedSubscription", back_populates="user", cascade="all, delete-orphan")
+    shared_feedback = relationship("SharedUserFeedback", back_populates="user", cascade="all, delete-orphan")
 
     def __str__(self):
         return f"User({self.username})"

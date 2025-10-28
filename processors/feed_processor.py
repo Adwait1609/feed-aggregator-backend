@@ -1,34 +1,41 @@
 import feedparser
-import asyncio
 from datetime import datetime, timezone
-from typing import List, Dict
-from urllib.parse import urljoin
+import hashlib
+from typing import Dict
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from models.article import Article
-from models.feed import RSSFeed
-from database.connection import get_db
+from models.article import SharedArticle
+from models.feed import SharedFeed
 from processors.article_processor import ArticleProcessor
 
-class FeedProcessor:
+class NormalizedFeedProcessor:
+    """Simple, efficient RSS feed processor"""
+    
     def __init__(self):
         self.article_processor = ArticleProcessor()
+        self.user_agent = "RSS-Feed-Aggregator/1.0"
     
-    async def process_feed(self, feed: RSSFeed, session: Session) -> Dict:
-        """Process single RSS feed"""
+    async def process_shared_feed(self, feed: SharedFeed, session: Session) -> Dict:
+        """Process a single RSS feed"""
         try:
-            logger.info(f"Processing feed: {feed.name}")
+            logger.info(f"Processing feed: {feed.default_name}")
             
             # Parse RSS feed
-            parsed_feed = feedparser.parse(feed.url)
+            parsed_feed = feedparser.parse(feed.url, agent=self.user_agent)
             
             if parsed_feed.bozo:
-                logger.warning(f"Feed parsing issues for {feed.name}: {parsed_feed.bozo_exception}")
+                logger.warning(f"Feed has parsing issues: {parsed_feed.bozo_exception}")
+                # Continue processing anyway - many feeds have minor issues
+            
+            if not parsed_feed.entries:
+                logger.warning(f"No entries found in feed: {feed.default_name}")
+                return {"status": "success", "new_articles": 0, "updated_articles": 0}
             
             new_articles = 0
             updated_articles = 0
             
+            # Process each entry
             for entry in parsed_feed.entries:
                 result = await self._process_entry(entry, feed, session)
                 if result == "new":
@@ -36,82 +43,101 @@ class FeedProcessor:
                 elif result == "updated":
                     updated_articles += 1
             
-            # Update feed metadata
-            feed.last_crawled_at = datetime.now(timezone.utc)
+            # Commit all changes
             session.commit()
             
-            logger.info(f"Feed {feed.name}: {new_articles} new, {updated_articles} updated articles")
+            logger.info(f"Feed {feed.default_name}: {new_articles} new, {updated_articles} updated")
             
             return {
-                "feed_name": feed.name,
+                "status": "success",
                 "new_articles": new_articles,
                 "updated_articles": updated_articles,
-                "status": "success"
+                "feed_name": feed.default_name
             }
             
         except Exception as e:
-            logger.error(f"Error processing feed {feed.name}: {str(e)}")
-            return {"feed_name": feed.name, "status": "error", "error": str(e)}
+            logger.error(f"Error processing feed {feed.default_name}: {e}")
+            session.rollback()
+            return {
+                "status": "error",
+                "error": str(e),
+                "feed_name": feed.default_name
+            }
+            
     
-    async def _process_entry(self, entry, feed: RSSFeed, session: Session) -> str:
-        """Process individual article entry"""
+    async def _process_entry(self, entry, feed: SharedFeed, session: Session) -> str:
+        """Process individual RSS entry"""
         try:
             # Extract article data
             article_data = self._extract_article_data(entry, feed)
             
             # Check if article already exists
-            existing_article = session.query(Article).filter(
-                Article.url == article_data["url"]
+            existing = session.query(SharedArticle).filter(
+                SharedArticle.feed_id == feed.id,
+                SharedArticle.url == article_data["url"]
             ).first()
             
-            if existing_article:
-                # Update existing article if needed
-                if self._should_update_article(existing_article, article_data):
+            if existing:
+                # Update if content changed
+                if existing.content_hash != article_data["content_hash"]:
+                    # Update existing article
                     for key, value in article_data.items():
-                        setattr(existing_article, key, value)
+                        setattr(existing, key, value)
+                    
+                    # Process updated content
+                    await self.article_processor.process_new_shared_article(existing)
                     return "updated"
                 return "exists"
             else:
                 # Create new article
-                article = Article(**article_data)
+                article = SharedArticle(**article_data)
                 session.add(article)
-                session.flush()  # Get the ID
+                session.flush()  # Get ID without committing
                 
-                # Process article content
-                await self.article_processor.process_new_article(article)
-                
+                # Process new article content
+                await self.article_processor.process_new_shared_article(article)
                 return "new"
                 
         except Exception as e:
-            logger.error(f"Error processing entry: {str(e)}")
+            logger.error(f"Error processing entry: {e}")
             return "error"
     
-    def _extract_article_data(self, entry, feed: RSSFeed) -> Dict:
+    def _extract_article_data(self, entry, feed: SharedFeed) -> Dict:
         """Extract article data from RSS entry"""
-        # Handle different date formats
+        # Get published date
         published_at = self._parse_date(entry.get('published_parsed') or entry.get('updated_parsed'))
         
+        # Extract content
+        content = self._extract_content(entry)
+        
+        # Generate content hash for duplicate detection
+        content_hash = self._generate_content_hash(entry.get('title', ''), content)
+        
         return {
-            "title": entry.get('title', '').strip(),
+            "feed_id": feed.id,
+            "title": entry.get('title', '').strip()[:500],  # Limit title length
             "url": entry.get('link', '').strip(),
             "description": entry.get('summary', '').strip(),
-            "author": entry.get('author', '').strip(),
+            "content": content,
+            "author": entry.get('author', '').strip()[:200],  # Limit author length
             "published_at": published_at,
-            "feed_id": feed.id,
-            "content": self._extract_content(entry),
+            "content_hash": content_hash,
         }
     
     def _parse_date(self, date_tuple) -> datetime:
         """Parse RSS date to datetime"""
         if date_tuple:
-            return datetime(*date_tuple[:6], tzinfo=timezone.utc)
+            try:
+                return datetime(*date_tuple[:6], tzinfo=timezone.utc)
+            except (ValueError, TypeError):
+                pass
         return datetime.now(timezone.utc)
     
     def _extract_content(self, entry) -> str:
-        """Extract full content from entry"""
-        # Try different content fields
+        """Extract content from RSS entry"""
         content = ""
         
+        # Try different content fields
         if hasattr(entry, 'content') and entry.content:
             content = entry.content[0].value
         elif hasattr(entry, 'summary_detail') and entry.summary_detail:
@@ -121,11 +147,7 @@ class FeedProcessor:
         
         return content.strip()
     
-    def _should_update_article(self, existing: Article, new_data: Dict) -> bool:
-        """Check if article should be updated"""
-        # Update if title, description, or content changed significantly
-        return (
-            existing.title != new_data["title"] or
-            existing.description != new_data["description"] or
-            len(new_data.get("content", "")) > len(existing.content or "")
-        )
+    def _generate_content_hash(self, title: str, content: str) -> str:
+        """Generate hash for duplicate detection"""
+        hash_content = f"{title}{content}"
+        return hashlib.md5(hash_content.encode('utf-8')).hexdigest()
